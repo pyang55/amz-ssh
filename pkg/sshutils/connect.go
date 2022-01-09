@@ -2,13 +2,13 @@ package sshutils
 
 import (
 	"fmt"
+
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/crypto/ssh/terminal"
 
 	"io"
 	"net"
-	"os"
 
+	"github.com/fyne-io/terminal"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -92,46 +92,78 @@ func Connect(bastionEndpoints ...EndpointIface) error {
 		}
 	}
 
-	sess, err := client.NewSession()
+	session, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("failed to create new session: %s", err)
 	}
-	defer sess.Close()
+	defer session.Close()
 
-	// Set IO
-	sess.Stdout = os.Stdout
-	sess.Stderr = os.Stderr
-	sess.Stdin = os.Stdin
+	// // Set IO
+	// sess.Stdout = os.Stdout
+	// sess.Stderr = os.Stderr
+	// sess.Stdin = os.Stdin
 
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          1,
 		ssh.TTY_OP_ISPEED: 14400,
 		ssh.TTY_OP_OSPEED: 14400,
 	}
-
-	fileDescriptor := int(os.Stdin.Fd())
-
-	if terminal.IsTerminal(fileDescriptor) {
-		originalState, err := terminal.MakeRaw(fileDescriptor)
-		if err != nil {
-			return nil
-		}
-		defer terminal.Restore(fileDescriptor, originalState)
-
-		termWidth, termHeight, err := terminal.GetSize(fileDescriptor)
-		if err != nil {
-			return err
-		}
-
-		err = sess.RequestPty("xterm-256color", termHeight, termWidth, modes)
-		if err != nil {
-			return err
-		}
+	err = session.RequestPty("xterm-256color", 24, 80, modes)
+	if err != nil {
+		log.Println(err)
+		return err
 	}
 
-	if err := sess.Shell(); err != nil {
-		log.Fatalf("failed to start shell: %s", err)
+	in, err := session.StdinPipe()
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	out, err := session.StdoutPipe()
+	if err != nil {
+		log.Println(err)
+		return err
 	}
 
-	return sess.Wait()
+	term := terminal.New()
+	go func() {
+		err = term.RunWithConnection(in, out)
+		if err != nil {
+			log.Println(err)
+		}
+		session.Close()
+	}()
+
+	go func() {
+		err := session.Shell()
+		if err != nil {
+			log.Println(err)
+		}
+	}()
+
+	// fileDescriptor := int(os.Stdin.Fd())
+
+	// if terminal.IsTerminal(fileDescriptor) {
+	// 	originalState, err := terminal.MakeRaw(fileDescriptor)
+	// 	if err != nil {
+	// 		return nil
+	// 	}
+	// 	defer terminal.Restore(fileDescriptor, originalState)
+
+	// 	termWidth, termHeight, err := terminal.GetSize(fileDescriptor)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+
+	// 	err = sess.RequestPty("xterm-256color", termHeight, termWidth, modes)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
+
+	// if err := sess.Shell(); err != nil {
+	// 	log.Fatalf("failed to start shell: %s", err)
+	// }
+
+	return nil
 }
